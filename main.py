@@ -4,6 +4,10 @@ import matplotlib.pyplot as plt
 import statsmodels
 import sklearn
 import pandas as pd
+import holidays as hd
+import pyowm
+from datetime import datetime
+from meteostat import Point, Daily
 
 df = pd.read_csv('transactions.csv', delimiter=';')
 df_metervalues = pd.read_csv('meter_values.csv', delimiter=';')
@@ -23,11 +27,13 @@ df_subset['TotalEnergy'] = df_subset['TotalEnergy'].str.replace(',', '.').astype
 print(df_subset['TotalEnergy'].head(10))
 daily_energy = df_subset.groupby('StartDate')
 daily_energy_mean = df_subset.groupby('StartDate')['TotalEnergy'].mean()
-
 print(df_subset.head(10))
 
 print(daily_energy_mean.head(30))
 
+# Print all the holidays in Netherlands in year 2019
+for ptr in hd.Netherlands(years=2019).items():
+    print(ptr)
 '''
 Method to extract all features for the model
 Features to inspect:
@@ -98,12 +104,95 @@ def drop_helper_columns(df_subset):
     df_subset = df_subset.drop('WeekdayToExtract', axis=1)
     return df_subset
 
+
+def extract_holidays(df_subset):
+    df_subset['StartDate'] = pd.to_datetime(df_subset['StartDate'])
+
+    hd_nl_2019 = hd.Netherlands(years=2019)
+
+    holiday_dates = list(hd_nl_2019.keys())
+
+    # Create a new column 'IsHoliday' and set default value to 0
+    df_subset['Holidays'] = 0
+
+    # Set 'IsHoliday' to 1 for holiday dates
+    df_subset.loc[df_subset['StartDate'].isin(holiday_dates), 'Holidays'] = 1
+
+    '''
+    prints out all holidays from dataset
+    holidays_subset = df_subset[df_subset['Holidays'] == 1]['StartDate']
+    print("Dates marked as holidays:\n")
+    for holiday_date in holidays_subset:
+        print(holiday_date)
+    '''
+    return df_subset['Holidays']
+
+
+def extract_dayCounts(df_subset):
+    df_subset['UTCTransactionStart'] = pd.to_datetime(df_subset['UTCTransactionStart'])
+
+    # Zählen, wie oft jeder Tag vorkommt und dem DataFrame hinzufügen
+    day_counts = df_subset['UTCTransactionStart'].dt.date.value_counts()
+    df_subset['DayCounts'] = df_subset['UTCTransactionStart'].dt.date.map(day_counts)
+
+
+    return df_subset['DayCounts']
+
+
+def extract_temperature(df_subset):
+    # owm = pyowm.OWM('1b574e901a932b453389e5cc2f1aba6d')
+    '''
+    weather_mgr = owm.weather_manager()
+    place = 'Medebach, DE'
+    observation = weather_mgr.weather_at_place(place)
+    temperature = observation.weather.temperature("celsius")["temp"]
+    humidity = observation.weather.humidity
+    wind = observation.weather.wind()
+    print(f'Temperature: {temperature}°C')
+    print(f'Humidity: {humidity}%')
+    print(f'Wind Speed: {wind["speed"]} m/s')
+    '''
+
+    # Import Meteostat library and dependencies
+
+
+    # Set time period
+    start = datetime(2019, 1, 1)
+    end = datetime(2019, 12, 31)
+    # Coordinates for Amsterdam
+    latitude = 52.3676
+    longitude = 4.9041
+
+    # Create a Point object for Amsterdam
+    amsterdam = Point(latitude, longitude, 10)
+
+    # Get daily data for 2019
+    data = Daily(amsterdam, start, end)
+    data = data.fetch()
+
+    # Plot line chart including average, minimum and maximum temperature
+    data.plot(y=['tavg', 'tmin', 'tmax'])
+    plt.show()
+
+    # Merge weather data with DataFrame based on date
+    df_subset['StartDate'] = pd.to_datetime(df_subset['StartDate'])
+
+    df_merged = pd.merge(df_subset, data, left_on='StartDate', right_on='time')
+    print(df_merged.head(10))
+    df_merged.to_excel('output.xlsx', index=False)
+
+    pass
+
+
 def features(df_subset):
     print("here are all features")
     df_subset['Months'] = extract_months(df_subset)
     df_subset['Season'] = extract_seasons(df_subset)
     df_subset['Weekday'] = extract_weekdays(df_subset)
     df_subset['Weekend'] = extract_weekend(df_subset)
+    df_subset['Holidays'] = extract_holidays(df_subset)
+    df_subset['DayCounts'] = extract_dayCounts(df_subset)
+    df_subset['Temperature'] = extract_temperature(df_subset)
 
     df_subset = drop_helper_columns(df_subset)
     print(list(df_subset))
