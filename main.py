@@ -9,31 +9,29 @@ import pyowm
 from datetime import datetime
 from meteostat import Point, Daily
 
-df = pd.read_csv('transactions.csv', delimiter=';')
-df_metervalues = pd.read_csv('meter_values.csv', delimiter=';')
 
-# Adjust columns
-columns_of_interest = ['TransactionId', 'ChargePoint', 'Connector', 'UTCTransactionStart', 'UTCTransactionStop',
-                       'StartCard', 'ConnectedTime', 'ChargeTime', 'TotalEnergy', 'MaxPower']
-columns_metervalues = ['TransactionId', 'ChargePoint', 'Connector', 'UTCTime', 'Collectedvalue',
-                       'EnergyInterval', 'AveragePower']
+def read_in():
+    df = pd.read_csv('transactions.csv', delimiter=';')
+    df_metervalues = pd.read_csv('meter_values.csv', delimiter=';')
 
-# Subset DataFrame with specific columns
-df_subset_metervalues = df_metervalues[columns_metervalues]
-df_subset = df[columns_of_interest]
+    # Adjust columns
+    columns_of_interest = ['TransactionId', 'ChargePoint', 'Connector', 'UTCTransactionStart', 'UTCTransactionStop',
+                           'StartCard', 'ConnectedTime', 'ChargeTime', 'TotalEnergy', 'MaxPower']
+    columns_metervalues = ['TransactionId', 'ChargePoint', 'Connector', 'UTCTime', 'Collectedvalue',
+                           'EnergyInterval', 'AveragePower']
 
-df_subset['StartDate'] = pd.to_datetime(df['UTCTransactionStart']).dt.date
-df_subset['TotalEnergy'] = df_subset['TotalEnergy'].str.replace(',', '.').astype(float)
-print(df_subset['TotalEnergy'].head(10))
-daily_energy = df_subset.groupby('StartDate')
-daily_energy_mean = df_subset.groupby('StartDate')['TotalEnergy'].mean()
-print(df_subset.head(10))
+    # Subset DataFrame with specific columns
+    df_subset_metervalues = df_metervalues[columns_metervalues]
+    df_subset = df[columns_of_interest]
 
-print(daily_energy_mean.head(30))
+    df_subset['StartDate'] = pd.to_datetime(df['UTCTransactionStart']).dt.date
+    df_subset['TotalEnergy'] = df_subset['TotalEnergy'].str.replace(',', '.').astype(float)
 
-# Print all the holidays in Netherlands in year 2019
-for ptr in hd.Netherlands(years=2019).items():
-    print(ptr)
+    return df_subset
+
+
+
+
 '''
 Method to extract all features for the model
 Features to inspect:
@@ -41,10 +39,10 @@ Power rolling week mean: Rolling mean considering a lag of 1 week, using a rolli
 Power rolling day mean: Rolling mean considering a lag of 1 day using a rolling window size of 1 day
 Power week lag 3 h mean: Rolling means considering a 1-week lag, using a rolling window size of 3 h
 Power day lag 3 h mean: Rolling mean considering a lag of 1 day, using a rolling window size of 3 h
-Site fuse: limit The fuse limit of the site in W
 Number of charging points: The number of charging points for the site
-Holiday: Categorical encoded; 1 if German holiday, 0 if not
+Holiday: Categorical encoded; 1 if Netherlands holiday, 0 if not
 Weekday: Categorical encoded weekdays
+Temperature: EV's Range is up to 30% less when its cold
 '''
 
 
@@ -179,7 +177,7 @@ def extract_temperature(df_subset):
 
     df_merged = pd.merge(df_subset, data, left_on='StartDate', right_on='time')
     print(df_merged.head(10))
-    df_merged.to_excel('output.xlsx', index=False)
+    #df_merged.to_excel('output.xlsx', index=False)
 
     pass
 
@@ -199,14 +197,37 @@ def features(df_subset):
     pass
 
 
+
+
+def plot(df_subset):
+
+    daily_energy_mean = df_subset.groupby('StartDate')['TotalEnergy'].mean()
+
+    x_values = np.arange(len(daily_energy_mean.index))
+    y_values = daily_energy_mean.values
+
+    coefficients = np.polyfit(x_values, y_values, 2)
+    quadratic_regression = np.poly1d(coefficients)
+
+    # Creating x values for the regression line
+    x_regression = np.linspace(0, len(daily_energy_mean.index) - 1, 100)
+    y_regression = quadratic_regression(x_regression)
+
+    # Plotting the data and the regression line
+    plt.figure(figsize=(10, 6))
+    plt.plot(x_values, y_values, marker='o', linestyle='-', label='Mean Total Energy')
+    plt.plot(x_regression, y_regression, color='red', linestyle='--', label='Quadratic Regression')
+    plt.title('Mean Total Energy by Start Date')
+    plt.xlabel('Start Date Index')
+    plt.ylabel('Mean Total Energy')
+    plt.xticks(rotation=45)
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+df_subset = read_in()
+
 features(df_subset)
 
-plt.figure(figsize=(10, 6))
-plt.plot(daily_energy_mean.index, daily_energy_mean.values, marker='o', linestyle='-')
-plt.title('Mean Total Energy by Start Date')
-plt.xlabel('Start Date')
-plt.ylabel('Mean Total Energy')
-plt.xticks(rotation=45)
-plt.grid(True)
-plt.tight_layout()
-plt.show()
+plot(df_subset)
