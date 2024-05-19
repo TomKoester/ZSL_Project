@@ -4,7 +4,7 @@ import pytz
 import numpy as np
 import pandas as pd
 import holidays as hd
-from datetime import datetime, time
+from datetime import datetime
 from meteostat import Point, Daily
 from datetime import timedelta
 from sklearn.metrics import mean_squared_error
@@ -25,8 +25,6 @@ def read_in():
 
     df_subset = df[columns_of_interest]
 
-    # Rename 'Energy' column to 'TotalEnergy'
-    df_subset.rename(columns={'Energy': 'TotalEnergy'}, inplace=True)
 
     df_subset['UTCTransactionStart'] = pd.to_datetime(df_subset['StartDate'] + ' ' + df_subset['StartTime'])
     df_subset['UTCTransactionStop'] = pd.to_datetime(df_subset['EndDate'] + ' ' + df_subset['EndTime'])
@@ -50,8 +48,8 @@ def energy_segmentation(input_df, interval_minutes=60):
     for index, row in input_df.iterrows():
         current_time = row['UTCTransactionStart']
         done_charging_time = row['UTCTransactionStop']
-        kwh_delivered = row['TotalEnergy']
-        total_duration = row['PluginDuration']
+        kwh_delivered = row['Energy']
+        total_duration = float(row['PluginDuration'])
 
 
         while current_time < done_charging_time:
@@ -85,6 +83,9 @@ def energy_segmentation(input_df, interval_minutes=60):
 
 
 def charging_time_and_idle_features(df_input):
+    df_input['UTCTransactionStart'] = pd.to_datetime(df_input['UTCTransactionStart'])
+    df_input['UTCTransactionStop'] = pd.to_datetime(df_input['UTCTransactionStop'])
+
     df_input['totalChargingTime'] = (df_input['PluginDuration'] * 60  - (df_input['UTCTransactionStart']).dt.total_seconds() / 60)
     df_input['totalIdleTime'] = ((df_input['UTCTransactionStop'].dt.total_seconds() - df_input['PluginDuration']).dt.total_seconds() / 60)
     df_input['totalParkingTime'] = df_input['totalIdleTime'] + df_input['totalChargingTime']
@@ -92,7 +93,7 @@ def charging_time_and_idle_features(df_input):
 
 
 def timestamp_format(dataframe):
-    columns_tobe_converted = ['UTCTransactionStart', 'UTCTransactionStop', 'doneChargingTime']
+    columns_tobe_converted = ['UTCTransactionStart', 'UTCTransactionStop']
     for column_name in columns_tobe_converted:
         dataframe[column_name] = pd.to_datetime(dataframe[column_name])
         dataframe[column_name] = dataframe[column_name].dt.strftime('%a, %d %b %Y %H:%M:%S GMT')
@@ -100,16 +101,21 @@ def timestamp_format(dataframe):
 
 
 def timezonecorrection(dataframe):
-    columns_tobe_converted = ['connectionTime', 'disconnectTime', 'doneChargingTime']
+    columns_tobe_converted = ['UTCTransactionStart', 'UTCTransactionStop']
 
     for column in columns_tobe_converted:
         dataframe[column] = pd.to_datetime(dataframe[column], errors='coerce')  # Handle errors with 'coerce'
-        dataframe[column] = dataframe[column].dt.tz_localize('UTC').dt.tz_convert('Europe/London')
+
+        # Check if the column is already timezone-aware
+        if dataframe[column].dt.tz is None:
+            dataframe[column] = dataframe[column].dt.tz_localize('UTC').dt.tz_convert('Europe/London')
+        else:
+            dataframe[column] = dataframe[column].dt.tz_convert('Europe/London')
+
         dataframe[column] = dataframe[column].dt.strftime('%Y-%m-%d %H:%M:%S.%f')
         dataframe[column] = pd.to_datetime(dataframe[column], format='%Y-%m-%d %H:%M:%S.%f')
 
     return dataframe
-
 def process_data(duplicated_df, unique_hours, n_samples=1, SEED=None):
     duplicated_df = duplicated_df.assign(hour=duplicated_df['doneChargingTime'].dt.hour)
     df_filtered = duplicated_df[duplicated_df['hour'].isin(unique_hours)]
@@ -569,11 +575,12 @@ def features(df_subset):
 
 
 df_subset = read_in()
+df_subset = timestamp_format(df_subset)
+df_subset = timezonecorrection(df_subset)
 df_subset = energy_segmentation(df_subset)
-# df_subset = timestamp_format(df_subset)
 # cant use it. I have no doneChargingTime Column
-# df_subset = charging_time_and_idle_features(df_subset)
+#df_subset = charging_time_and_idle_features(df_subset)
 print(df_subset)
-#print(energy_segmentation(df_subset))
+# print(energy_segmentation(df_subset))
 
-features(df_subset)
+# features(df_subset)
