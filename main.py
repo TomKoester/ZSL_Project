@@ -135,7 +135,7 @@ def process_data(duplicated_df, unique_hours, n_samples=1, SEED=None):
 
 
 def create_temporal_features(df):
-    ca_holidays = hd.GB(state='ENG', observed=False)
+    gb_holidays = hd.GB(state='ENG', observed=False)
 
     df['UTCTransactionStop'] = pd.to_datetime(df['UTCTransactionStop'])
     df['Hour_of_Day'] = df['UTCTransactionStop'].dt.hour
@@ -166,8 +166,8 @@ def create_temporal_features(df):
 
     def categorize_day(timestamp):
         date = timestamp.date()
-        if date in ca_holidays:
-            return 'Holiday: ' + ca_holidays[date]
+        if date in gb_holidays:
+            return 'Holiday: ' + gb_holidays[date]
         elif timestamp.weekday() == 5:
             return 'WeekendSaturday'
         elif timestamp.weekday() == 6:
@@ -179,8 +179,8 @@ def create_temporal_features(df):
 
     df['Season'] = (df['Month_Of_Year'] % 12 + 3) // 3
 
-    pacific_tz = pytz.timezone('America/Los_Angeles')
-    df['daylightSaving'] = df['UTCTransactionStop'].dt.tz_localize('UTC').dt.tz_convert(pacific_tz).apply(lambda x: int(x.dst().total_seconds() != 0))
+    london_tz = pytz.timezone('Europe/London')
+    df['daylightSaving'] = df['UTCTransactionStop'].dt.tz_localize('UTC').dt.tz_convert(london_tz).apply(lambda x: int(x.dst().total_seconds() != 0))
 
     return df
 def day_categories(df, source_column):
@@ -253,7 +253,7 @@ def smoothing_with_best_params(dataframe, column_names, method='cro', alpha_rang
     for column_name in column_names:
         # print(f"Analysis for column: {column_name}")
 
-        df_column = df[['doneChargingTime', column_name]]
+        df_column = df[['UTCTransactionStop', column_name]]
         total_rows = len(df_column)
         zero_count = len(df_column[df_column[column_name] == 0])
         non_zero_count = len(df_column[df_column[column_name] != 0])
@@ -382,92 +382,8 @@ Power rolling week mean: Rolling mean considering a lag of 1 week, using a rolli
 Power rolling day mean: Rolling mean considering a lag of 1 day using a rolling window size of 1 day
 Power week lag 3 h mean: Rolling means considering a 1-week lag, using a rolling window size of 3 h
 Power day lag 3 h mean: Rolling mean considering a lag of 1 day, using a rolling window size of 3 h
-Number of charging points: The number of charging points for the site
-Holiday: Categorical encoded; 1 if Netherlands holiday, 0 if not
-Weekday: Categorical encoded weekdays
 Temperature: EV's Range is up to 30% less when its cold
 '''
-
-
-def extract_seasons(df_subset):
-    season_dict = {'January': 'Winter',
-                   'February': 'Winter',
-                   'March': 'Spring',
-                   'April': 'Spring',
-                   'May': 'Spring',
-                   'June': 'Summer',
-                   'July': 'Summer',
-                   'August': 'Summer',
-                   'September': 'Fall',
-                   'October': 'Fall',
-                   'November': 'Fall',
-                   'December': 'Winter'}
-    return df_subset['Months'].apply(lambda x: season_dict[x])
-
-
-def extract_months(df_subset):
-    # Convert 'StartDate' to datetime format
-    df_subset['StartDate'] = pd.to_datetime(df_subset['StartDate'])
-
-    # Extract month as numerical digit
-    df_subset['MonthDigit'] = df_subset['StartDate'].dt.month
-
-    # Map month numerical digit to month name
-    df_subset['Months'] = df_subset['MonthDigit'].apply(
-        lambda x: pd.Timestamp(year=2018, month=x, day=1).strftime('%B'))
-
-    return df_subset['Months']
-
-
-def extract_weekdays(df_subset):
-    # Convert 'StartDate' to datetime format
-    df_subset['StartDate'] = pd.to_datetime(df_subset['StartDate'])
-
-    # Extract weekday as numerical digit (0 for Monday, 1 for Tuesday, ..., 6 for Sunday)
-    df_subset['Weekday'] = df_subset['StartDate'].dt.weekday
-
-    # Map numerical weekday to categorical encoded weekday
-    weekday_dict = {0: 'Monday', 1: 'Tuesday', 2: 'Wednesday', 3: 'Thursday', 4: 'Friday', 5: 'Saturday', 6: 'Sunday'}
-    df_subset['Weekday'] = df_subset['Weekday'].map(weekday_dict)
-
-    return df_subset['Weekday']
-
-
-def extract_weekend(df_subset):
-    df_subset['StartDate'] = pd.to_datetime(df_subset['StartDate'])
-
-    # Extract weekday as numerical digit (0 for Monday, 1 for Tuesday, ..., 6 for Sunday)
-    df_subset['WeekdayToExtract'] = df_subset['StartDate'].dt.weekday
-    df_subset['Weekend'] = df_subset['WeekdayToExtract'].apply(lambda x: 1 if x >= 5 else 0)
-    return df_subset['Weekend']
-    pass
-def drop_helper_columns(df_subset):
-    df_subset = df_subset.drop('WeekdayToExtract', axis=1)
-    return df_subset
-
-
-def extract_holidays(df_subset):
-    df_subset['StartDate'] = pd.to_datetime(df_subset['StartDate'])
-
-    hd_nl_2019 = hd.Netherlands(years=2019)
-
-    holiday_dates = list(hd_nl_2019.keys())
-
-    # Create a new column 'IsHoliday' and set default value to 0
-    df_subset['Holidays'] = 0
-
-    # Set 'IsHoliday' to 1 for holiday dates
-    df_subset.loc[df_subset['StartDate'].isin(holiday_dates), 'Holidays'] = 1
-
-    '''
-    prints out all holidays from dataset
-    holidays_subset = df_subset[df_subset['Holidays'] == 1]['StartDate']
-    print("Dates marked as holidays:\n")
-    for holiday_date in holidays_subset:
-        print(holiday_date)
-    '''
-    return df_subset['Holidays']
-
 
 def extract_dayCounts(df_subset):
     df_subset['UTCTransactionStart'] = pd.to_datetime(df_subset['UTCTransactionStart'])
@@ -501,11 +417,11 @@ def extract_temperature(df_subset):
 
 
     # Set time period
-    start = datetime(2019, 1, 1)
-    end = datetime(2019, 12, 31)
+    start = datetime(2017, 1, 1)
+    end = datetime(2017, 12, 31)
     # Coordinates for Amsterdam
-    latitude = 52.3676
-    longitude = 4.9041
+    latitude = 51.509865
+    longitude = -0.118092
 
     # Create a Point object for Amsterdam
     amsterdam = Point(latitude, longitude, 10)
@@ -524,7 +440,7 @@ def extract_temperature(df_subset):
     df_merged = pd.merge(df_subset, data, left_on='StartDate', right_on='time')
     #df_merged.to_excel('output.xlsx', index=False)
 
-    pass
+    return df_merged
 
 
 def features(df_subset):
@@ -535,9 +451,8 @@ def features(df_subset):
     #df_subset['Weekend'] = extract_weekend(df_subset)
     #df_subset['Holidays'] = extract_holidays(df_subset)
     df_subset['DayCounts'] = extract_dayCounts(df_subset)
-    df_subset['Temperature'] = extract_temperature(df_subset)
+    df_subset = extract_temperature(df_subset)
     #df_subset = drop_helper_columns(df_subset)
-    print(list(df_subset))
     return df_subset
 
 
@@ -549,11 +464,15 @@ df_subset = timezonecorrection(dataframe=df_subset)
 df_subset = create_temporal_features(df=df_subset)
 df_subset = expanding_mean_std_weighted_avg(dataframe=df_subset, window_size=10)
 df_subset = features(df_subset=df_subset)
+df_subset = smoothing_with_best_params(dataframe=df_subset, column_names=['Energy', 'expanding_mean', 'expanding_std', 'weighted_avg'], method='cro', alpha_range=None, beta_range=None)
+
 # df_subset = create_lag_features(df_subset, target=df_subset['Energy'],  thres=0.3)
 # df_subset = energy_segmentation(df_subset)
 # cant use it because the dataset has no DoneCharging Timestamp
 # df_subset = charging_time_and_idle_features(df_subset)
+unique_value_count(df=df_subset, df_name="UK")
 print(df_subset)
-# print(energy_segmentation(df_subset))
 
-# features(df_subset)
+df_subset.to_excel('output1.xlsx', index=False)
+
+# print(energy_segmentation(df_subset))
