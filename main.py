@@ -30,7 +30,7 @@ def read_in():
     df_subset['UTCTransactionStop'] = pd.to_datetime(df_subset['EndDate'] + ' ' + df_subset['EndTime'])
 
 
-    print(df_subset.head(10))
+    # print(df_subset.head(10))
     # Asif
     df_subset.sort_values(by=['UTCTransactionStart'], inplace=True)
     # No NA's in my dataset but still use it
@@ -66,31 +66,21 @@ def energy_segmentation(input_df, interval_minutes=60):
     result_df.reset_index(drop=True, inplace=True)
     return result_df
 
-
-'''def charging_time_and_idle_features(df_input):
-    # Calculate total charging time in minutes
-    df_input['totalChargingTime'] = (df_input['PluginDuration'] * 60) - (
-                (df_input['UTCTransactionStart'] - df_input['UTCTransactionStart'].min()).dt.total_seconds() / 60)
-
-    # Calculate total idle time in minutes
-    df_input['totalIdleTime'] = ((df_input['UTCTransactionStop'] - df_input[
-        'UTCTransactionStart']).dt.total_seconds() / 60) - df_input['totalChargingTime']
-
-    # Calculate total parking time by adding charging and idle time
-    df_input['totalParkingTime'] = df_input['totalIdleTime'] + df_input['totalChargingTime']
-
-    return df_input'''
-
-
+'''
 def charging_time_and_idle_features(df_input):
     df_input['UTCTransactionStart'] = pd.to_datetime(df_input['UTCTransactionStart'])
     df_input['UTCTransactionStop'] = pd.to_datetime(df_input['UTCTransactionStop'])
 
-    df_input['totalChargingTime'] = (df_input['PluginDuration'] * 60  - (df_input['UTCTransactionStart']).dt.total_seconds() / 60)
-    df_input['totalIdleTime'] = ((df_input['UTCTransactionStop'].dt.total_seconds() - df_input['PluginDuration']).dt.total_seconds() / 60)
+    #modified Asif version caus dt.total_seconds() dont work
+
+    df_input['StartInSeconds'] = df_input['UTCTransactionStart'].apply(lambda x: int(x.timestamp()))
+    df_input['StopInSeconds'] = df_input['UTCTransactionStop'].apply(lambda x: int(x.timestamp()))
+
+    df_input['totalChargingTime'] = (df_input['PluginDuration'] * 3600  - (df_input['StartInSeconds']) / 60)
+    df_input['totalIdleTime'] = ((df_input['StopInSeconds'] - (df_input['PluginDuration'] * 3600)) / 60)
     df_input['totalParkingTime'] = df_input['totalIdleTime'] + df_input['totalChargingTime']
     return df_input
-
+'''
 
 def timestamp_format(dataframe):
     columns_tobe_converted = ['UTCTransactionStart', 'UTCTransactionStop']
@@ -104,18 +94,15 @@ def timezonecorrection(dataframe):
     columns_tobe_converted = ['UTCTransactionStart', 'UTCTransactionStop']
 
     for column in columns_tobe_converted:
-        dataframe[column] = pd.to_datetime(dataframe[column], errors='coerce')  # Handle errors with 'coerce'
-
-        # Check if the column is already timezone-aware
-        if dataframe[column].dt.tz is None:
-            dataframe[column] = dataframe[column].dt.tz_localize('UTC').dt.tz_convert('Europe/London')
-        else:
-            dataframe[column] = dataframe[column].dt.tz_convert('Europe/London')
-
+        dataframe[column] = pd.to_datetime(dataframe[column], errors='coerce')
+        print(f"Vor Hinzufügen einer Stunde: {dataframe[column]} \n")
+        dataframe[column] = dataframe[column] + pd.Timedelta(hours=1)
         dataframe[column] = dataframe[column].dt.strftime('%Y-%m-%d %H:%M:%S.%f')
         dataframe[column] = pd.to_datetime(dataframe[column], format='%Y-%m-%d %H:%M:%S.%f')
+        print(f"Nach Hinzufügen einer Stunde: {dataframe[column]} \n")
 
     return dataframe
+'''
 def process_data(duplicated_df, unique_hours, n_samples=1, SEED=None):
     duplicated_df = duplicated_df.assign(hour=duplicated_df['doneChargingTime'].dt.hour)
     df_filtered = duplicated_df[duplicated_df['hour'].isin(unique_hours)]
@@ -144,45 +131,25 @@ def process_data(duplicated_df, unique_hours, n_samples=1, SEED=None):
 
     df_final.drop_duplicates(subset='doneChargingTime', inplace=True)
     return df_final
-
-
-def convert_and_sort(dataframe, datetime_column):
-    """
-    Converts a DataFrame's datetime column to datetime format and sorts the DataFrame based on that column.
-
-    Args:
-        dataframe (pd.DataFrame): The DataFrame to be processed.
-        datetime_column (str): The name of the datetime column for conversion and sorting.
-
-    Returns:
-        pd.DataFrame: The processed DataFrame with the datetime column converted and sorted.
-    """
-    dataframe[datetime_column] = pd.to_datetime(dataframe[datetime_column])
-    dataframe.sort_values(by=datetime_column, inplace=True)
-
-    unique_sessions = dataframe['sessionID'].unique()
-    mapping = {value: code for code, value in enumerate(unique_sessions)}
-    dataframe['sessionID'] = dataframe['sessionID'].map(mapping)
-
-    return dataframe
+'''
 
 
 def create_temporal_features(df):
-    ca_holidays = hd.England(state='London', observed=False)
+    ca_holidays = hd.GB(state='ENG', observed=False)
 
-    df['doneChargingTime'] = pd.to_datetime(df['doneChargingTime'])
-    df['Hour_of_Day'] = df['doneChargingTime'].dt.hour
-    df['Day_Of_Week'] = df['doneChargingTime'].dt.dayofweek
-    df['Day_Of_year'] = df['doneChargingTime'].dt.dayofyear
-    df['Month_Of_Year'] = df['doneChargingTime'].dt.month
+    df['UTCTransactionStop'] = pd.to_datetime(df['UTCTransactionStop'])
+    df['Hour_of_Day'] = df['UTCTransactionStop'].dt.hour
+    df['Day_Of_Week'] = df['UTCTransactionStop'].dt.dayofweek
+    df['Day_Of_year'] = df['UTCTransactionStop'].dt.dayofyear
+    df['Month_Of_Year'] = df['UTCTransactionStop'].dt.month
 
     conditions = [
-    (df['Hour_of_Day'] >= 0) & (df['Hour_of_Day'] < 4) & (df['kWhDelivered'] != 0),
-    (df['Hour_of_Day'] >= 4) & (df['Hour_of_Day'] < 8) & (df['kWhDelivered'] != 0),
-    (df['Hour_of_Day'] >= 8) & (df['Hour_of_Day'] < 12) & (df['kWhDelivered'] != 0),
-    (df['Hour_of_Day'] >= 12) & (df['Hour_of_Day'] < 16) & (df['kWhDelivered'] != 0),
-    (df['Hour_of_Day'] >= 16) & (df['Hour_of_Day'] < 20) & (df['kWhDelivered'] != 0),
-    (df['Hour_of_Day'] >= 20) & (df['Hour_of_Day'] < 24) & (df['kWhDelivered'] != 0)
+    (df['Hour_of_Day'] >= 0) & (df['Hour_of_Day'] < 4) & (df['Energy'] != 0),
+    (df['Hour_of_Day'] >= 4) & (df['Hour_of_Day'] < 8) & (df['Energy'] != 0),
+    (df['Hour_of_Day'] >= 8) & (df['Hour_of_Day'] < 12) & (df['Energy'] != 0),
+    (df['Hour_of_Day'] >= 12) & (df['Hour_of_Day'] < 16) & (df['Energy'] != 0),
+    (df['Hour_of_Day'] >= 16) & (df['Hour_of_Day'] < 20) & (df['Energy'] != 0),
+    (df['Hour_of_Day'] >= 20) & (df['Hour_of_Day'] < 24) & (df['Energy'] != 0)
     ]
 
     categories = ['lateNight', 'earlyMorning', 'morning', 'midDay', 'evening', 'night']
@@ -190,12 +157,12 @@ def create_temporal_features(df):
     df['sessionOfDay'] = pd.Categorical(np.select(conditions, categories), categories=categories)
     df['sessionOfDay'] = df['sessionOfDay'].cat.codes
 
-    df['Time_of_day_0_4'] = ((df['Hour_of_Day'] >= 0) & (df['Hour_of_Day'] < 4) & (df['kWhDelivered'] != 0)).astype(int)
-    df['Time_of_day_4_8'] = ((df['Hour_of_Day'] >= 4) & (df['Hour_of_Day'] < 8) & (df['kWhDelivered'] != 0)).astype(int)
-    df['Time_of_day_8_12'] = ((df['Hour_of_Day'] >= 8) & (df['Hour_of_Day'] < 12) & (df['kWhDelivered'] != 0)).astype(int)
-    df['Time_of_day_12_16'] = ((df['Hour_of_Day'] >= 12) & (df['Hour_of_Day'] < 16) & (df['kWhDelivered'] != 0)).astype(int)
-    df['Time_of_day_16_20'] = ((df['Hour_of_Day'] >= 16) & (df['Hour_of_Day'] < 20) & (df['kWhDelivered'] != 0)).astype(int)
-    df['Time_of_day_20_24'] = ((df['Hour_of_Day'] >= 20) & (df['Hour_of_Day'] < 24) & (df['kWhDelivered'] != 0)).astype(int)
+    df['Time_of_day_0_4'] = ((df['Hour_of_Day'] >= 0) & (df['Hour_of_Day'] < 4) & (df['Energy'] != 0)).astype(int)
+    df['Time_of_day_4_8'] = ((df['Hour_of_Day'] >= 4) & (df['Hour_of_Day'] < 8) & (df['Energy'] != 0)).astype(int)
+    df['Time_of_day_8_12'] = ((df['Hour_of_Day'] >= 8) & (df['Hour_of_Day'] < 12) & (df['Energy'] != 0)).astype(int)
+    df['Time_of_day_12_16'] = ((df['Hour_of_Day'] >= 12) & (df['Hour_of_Day'] < 16) & (df['Energy'] != 0)).astype(int)
+    df['Time_of_day_16_20'] = ((df['Hour_of_Day'] >= 16) & (df['Hour_of_Day'] < 20) & (df['Energy'] != 0)).astype(int)
+    df['Time_of_day_20_24'] = ((df['Hour_of_Day'] >= 20) & (df['Hour_of_Day'] < 24) & (df['Energy'] != 0)).astype(int)
 
     def categorize_day(timestamp):
         date = timestamp.date()
@@ -208,12 +175,12 @@ def create_temporal_features(df):
         else:
             return 'Weekday'
 
-    df['DayCategory'] = df['doneChargingTime'].apply(categorize_day)
+    df['DayCategory'] = df['UTCTransactionStop'].apply(categorize_day)
 
     df['Season'] = (df['Month_Of_Year'] % 12 + 3) // 3
 
     pacific_tz = pytz.timezone('America/Los_Angeles')
-    df['daylightSaving'] = df['doneChargingTime'].dt.tz_localize('UTC').dt.tz_convert(pacific_tz).apply(lambda x: int(x.dst().total_seconds() != 0))
+    df['daylightSaving'] = df['UTCTransactionStop'].dt.tz_localize('UTC').dt.tz_convert(pacific_tz).apply(lambda x: int(x.dst().total_seconds() != 0))
 
     return df
 def day_categories(df, source_column):
@@ -333,11 +300,13 @@ def smoothing_with_best_params(dataframe, column_names, method='cro', alpha_rang
 
 def expanding_mean_std_weighted_avg(dataframe, window_size):
 
-    dataframe['expanding_mean'] = dataframe['kWhDelivered'].expanding(window_size).mean()
-    dataframe['expanding_std'] = dataframe['kWhDelivered'].expanding(window_size).std()
+    dataframe['expanding_mean'] = dataframe['Energy'].expanding(window_size).mean()
+    dataframe['expanding_std'] = dataframe['Energy'].expanding(window_size).std()
 
-    weights = [0.4, 0.2]
-    dataframe['weighted_avg'] = dataframe['kWhDelivered'].rolling(window=window_size).apply(lambda x: (x * weights).sum(), raw=True)
+    # weights have to be the same size as window_size
+    weights = [0.4, 0.2] + [0.4 / (window_size - 2)] * (window_size - 2)
+    weights = pd.Series(weights) / pd.Series(weights).sum()  # Normalising of the weights
+    dataframe['weighted_avg'] = dataframe['Energy'].rolling(window=window_size).apply(lambda x: (x * weights).sum(), raw=True)
 
     dataframe.dropna(inplace=True)
 
@@ -348,7 +317,7 @@ def create_lag_features(dataframe, target, lags=None, thres=0.2):
     features = pd.DataFrame()
 
     if lags is None:
-        partial = pd.Series(data=pacf(target, nlags=48))
+        partial = pd.Series(data=pacf(target, nlags=2))
         lags = list(partial[np.abs(partial) >= thres].index)
 
     df = pd.DataFrame()
@@ -369,7 +338,7 @@ def create_lag_features(dataframe, target, lags=None, thres=0.2):
     return final_df
 
 def unique_value_count(df, df_name):
-    columns_to_count_unique = ['stationID', 'EVSEType', 'chargingReqType', 'Fee', 'UniqueStationID', 'UniqueEVSEType', 'UniquechargingReqType', 'UniqueFee']
+    columns_to_count_unique = ['ChargingEvent', 'StartDate']
     unique_count_list = []
 
     for column in columns_to_count_unique:
@@ -559,27 +528,31 @@ def extract_temperature(df_subset):
 
 
 def features(df_subset):
-    print("here are all features")
-    df_subset['Months'] = extract_months(df_subset)
-    df_subset['Season'] = extract_seasons(df_subset)
-    df_subset['Weekday'] = extract_weekdays(df_subset)
-    df_subset['Weekend'] = extract_weekend(df_subset)
-    df_subset['Holidays'] = extract_holidays(df_subset)
+    print("here are all my features")
+    #df_subset['Months'] = extract_months(df_subset)
+    #df_subset['Season'] = extract_seasons(df_subset)
+    #df_subset['Weekday'] = extract_weekdays(df_subset)
+    #df_subset['Weekend'] = extract_weekend(df_subset)
+    #df_subset['Holidays'] = extract_holidays(df_subset)
     df_subset['DayCounts'] = extract_dayCounts(df_subset)
     df_subset['Temperature'] = extract_temperature(df_subset)
-    df_subset = drop_helper_columns(df_subset)
+    #df_subset = drop_helper_columns(df_subset)
     print(list(df_subset))
-    pass
+    return df_subset
 
 
 
 
 df_subset = read_in()
-df_subset = timestamp_format(df_subset)
-df_subset = timezonecorrection(df_subset)
-df_subset = energy_segmentation(df_subset)
-# cant use it. I have no doneChargingTime Column
-#df_subset = charging_time_and_idle_features(df_subset)
+df_subset = timestamp_format(dataframe=df_subset)
+df_subset = timezonecorrection(dataframe=df_subset)
+df_subset = create_temporal_features(df=df_subset)
+df_subset = expanding_mean_std_weighted_avg(dataframe=df_subset, window_size=10)
+df_subset = features(df_subset=df_subset)
+# df_subset = create_lag_features(df_subset, target=df_subset['Energy'],  thres=0.3)
+# df_subset = energy_segmentation(df_subset)
+# cant use it because the dataset has no DoneCharging Timestamp
+# df_subset = charging_time_and_idle_features(df_subset)
 print(df_subset)
 # print(energy_segmentation(df_subset))
 
