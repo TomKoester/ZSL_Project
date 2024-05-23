@@ -16,15 +16,13 @@ from fastai.tabular.model import emb_sz_rule
 
 def read_in():
 
-    df = pd.read_csv('electric-chargepoint-analysis-2017-raw-domestics-data.csv', delimiter=',', nrows=100)
+    df = pd.read_csv('electric-chargepoint-analysis-2017-raw-domestics-data.csv', delimiter=',', nrows=70000)
     print("Number of rows read:", len(df))
 
     columns_of_interest = ['ChargingEvent', 'StartDate', 'StartTime', 'EndDate', 'EndTime', 'Energy',
                            'PluginDuration']
 
-
     df_subset = df[columns_of_interest]
-
 
     df_subset['UTCTransactionStart'] = pd.to_datetime(df_subset['StartDate'] + ' ' + df_subset['StartTime'])
     df_subset['UTCTransactionStop'] = pd.to_datetime(df_subset['EndDate'] + ' ' + df_subset['EndTime'])
@@ -326,8 +324,7 @@ def create_lag_features(dataframe, target, lags=None, thres=0.2):
     for l in lags:
         df[f"lag_{l}"] = target.shift(l)
 
-    features = pd.DataFrame(scaler.fit_transform(df[df.columns]),
-                            columns=df.columns)
+    # features = pd.DataFrame(scaler.fit_transform(df[df.columns]),columns=df.columns)
 
     features = df
     features.index = target.index
@@ -382,7 +379,10 @@ Power rolling week mean: Rolling mean considering a lag of 1 week, using a rolli
 Power rolling day mean: Rolling mean considering a lag of 1 day using a rolling window size of 1 day
 Power week lag 3 h mean: Rolling means considering a 1-week lag, using a rolling window size of 3 h
 Power day lag 3 h mean: Rolling mean considering a lag of 1 day, using a rolling window size of 3 h
+
+Features implemented: 
 Temperature: EV's Range is up to 30% less when its cold
+Number of same Days: Count the number of same Days in the dataset
 '''
 
 def extract_dayCounts(df_subset):
@@ -456,7 +456,57 @@ def features(df_subset):
     return df_subset
 
 
+def time_to_quarter_hour(time_str):
+    # Split the time string into hours and minutes
+    hours, minutes, seconds = map(int, time_str.split(':'))
 
+    # Calculate the total minutes since midnight
+    total_minutes = hours * 60 + minutes
+
+    # Calculate the number of quarter hours passed
+    quarter_hours = total_minutes // 15
+
+    return quarter_hours
+
+
+def check_previous_charges(df, datetime_column='StartDate'):
+    df['datetime'] = pd.to_datetime(df[datetime_column])
+    df['date'] = df['datetime'].dt.date
+    df['time'] = df['datetime'].dt.time
+
+
+    # Sort the DataFrame by datetime
+    df = df.sort_values(by='datetime')
+
+    # Initialize columns to store the results of the check
+    df['previous_day_charge'] = 0
+    df['previous_week_charge'] = 0
+
+    # Iterate over the DataFrame and check for previous charges
+    for i in range(1, len(df)):
+        current_row = df.iloc[i]
+        previous_rows = df.iloc[:i]
+
+        # Check the day before and the same weekday the week before
+        previous_day = current_row['date'] - pd.Timedelta(days=1)
+        previous_weekday = current_row['date'] - pd.Timedelta(weeks=1)
+
+        same_quarter_hour_day = previous_rows[
+            (previous_rows['quarter_hours'] == current_row['quarter_hours']) &
+            (previous_rows['date'] == previous_day)
+            ]
+
+        same_quarter_hour_week = previous_rows[
+            (previous_rows['quarter_hours'] == current_row['quarter_hours']) &
+            (previous_rows['date'] == previous_weekday)
+            ]
+
+        if not same_quarter_hour_day.empty:
+            df.at[i, 'previous_day_charge'] = 1
+        if not same_quarter_hour_week.empty:
+            df.at[i, 'previous_week_charge'] = 1
+
+    return df
 
 df_subset = read_in()
 df_subset = timestamp_format(dataframe=df_subset)
@@ -466,13 +516,23 @@ df_subset = expanding_mean_std_weighted_avg(dataframe=df_subset, window_size=10)
 df_subset = features(df_subset=df_subset)
 df_subset = smoothing_with_best_params(dataframe=df_subset, column_names=['Energy', 'expanding_mean', 'expanding_std', 'weighted_avg'], method='cro', alpha_range=None, beta_range=None)
 
-# df_subset = create_lag_features(df_subset, target=df_subset['Energy'],  thres=0.3)
+# comment this in for energy segmentation (e.g. 18-21 o'clock with 1 hour intervall are 3 more rows)
 # df_subset = energy_segmentation(df_subset)
-# cant use it because the dataset has no DoneCharging Timestamp
-# df_subset = charging_time_and_idle_features(df_subset)
+# TODO
+# df_subset = create_lag_features(df_subset, target=df_subset['Energy'],  thres=0.3)
+
 unique_value_count(df=df_subset, df_name="UK")
-print(df_subset)
+
+
+
+df_subset['quarter_hours'] = df_subset['StartTime'].apply(time_to_quarter_hour)
+df_subset = check_previous_charges(df=df_subset)
+
+
 
 df_subset.to_excel('output1.xlsx', index=False)
 
-# print(energy_segmentation(df_subset))
+
+# cant use it because the dataset has no DoneCharging Timestamp
+# df_subset = charging_time_and_idle_features(df_subset)
+
