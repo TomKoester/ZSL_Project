@@ -16,7 +16,7 @@ from fastai.tabular.model import emb_sz_rule
 
 def read_in():
 
-    df = pd.read_csv('electric-chargepoint-analysis-2017-raw-domestics-data.csv', delimiter=',', nrows=70000)
+    df = pd.read_csv('electric-chargepoint-analysis-2017-raw-domestics-data.csv', delimiter=',', nrows=20000)
     print("Number of rows read:", len(df))
 
     columns_of_interest = ['ChargingEvent', 'StartDate', 'StartTime', 'EndDate', 'EndTime', 'Energy',
@@ -93,11 +93,11 @@ def timezonecorrection(dataframe):
 
     for column in columns_tobe_converted:
         dataframe[column] = pd.to_datetime(dataframe[column], errors='coerce')
-        print(f"Vor Hinzufügen einer Stunde: {dataframe[column]} \n")
+        # print(f"Vor Hinzufügen einer Stunde: {dataframe[column]} \n")
         dataframe[column] = dataframe[column] + pd.Timedelta(hours=1)
         dataframe[column] = dataframe[column].dt.strftime('%Y-%m-%d %H:%M:%S.%f')
         dataframe[column] = pd.to_datetime(dataframe[column], format='%Y-%m-%d %H:%M:%S.%f')
-        print(f"Nach Hinzufügen einer Stunde: {dataframe[column]} \n")
+        # print(f"Nach Hinzufügen einer Stunde: {dataframe[column]} \n")
 
     return dataframe
 '''
@@ -443,13 +443,34 @@ def extract_temperature(df_subset):
     return df_merged
 
 
+def extract_months(df_subset):
+    # Sicherstellen, dass die StartDate-Spalte vom Typ datetime ist
+    df_subset['StartDate'] = pd.to_datetime(df_subset['StartDate'])
+
+    # Extrahieren des Monats und in einer neuen Spalte speichern
+    df_subset['Month'] = df_subset['StartDate'].dt.month
+
+    return df_subset
+
+
+def extract_day_in_month(df_subset):
+    # Sicherstellen, dass die StartDate-Spalte vom Typ datetime ist
+    df_subset['StartDate'] = pd.to_datetime(df_subset['StartDate'])
+
+    # Extrahieren des Tages im Monat und in einer neuen Spalte speichern
+    df_subset['DayInMonth'] = df_subset['StartDate'].dt.day
+
+    return df_subset
+
+
 def features(df_subset):
     print("here are all my features")
-    #df_subset['Months'] = extract_months(df_subset)
-    #df_subset['Season'] = extract_seasons(df_subset)
-    #df_subset['Weekday'] = extract_weekdays(df_subset)
-    #df_subset['Weekend'] = extract_weekend(df_subset)
-    #df_subset['Holidays'] = extract_holidays(df_subset)
+    df_subset = extract_months(df_subset)
+    df_subset = extract_day_in_month(df_subset)
+    # df_subset['Season'] = extract_seasons(df_subset)
+    # df_subset['Weekday'] = extract_weekdays(df_subset)
+    # df_subset['Weekend'] = extract_weekend(df_subset)
+    # df_subset['Holidays'] = extract_holidays(df_subset)
     df_subset['DayCounts'] = extract_dayCounts(df_subset)
     df_subset = extract_temperature(df_subset)
     #df_subset = drop_helper_columns(df_subset)
@@ -469,44 +490,26 @@ def time_to_quarter_hour(time_str):
     return quarter_hours
 
 
-def check_previous_charges(df, datetime_column='StartDate'):
-    df['datetime'] = pd.to_datetime(df[datetime_column])
-    df['date'] = df['datetime'].dt.date
-    df['time'] = df['datetime'].dt.time
+def cyclic_feature_encoding(df, targets):
+    for column in targets:
+        max_val = df[column].max()
 
-
-    # Sort the DataFrame by datetime
-    df = df.sort_values(by='datetime')
-
-    # Initialize columns to store the results of the check
-    df['previous_day_charge'] = 0
-    df['previous_week_charge'] = 0
-
-    # Iterate over the DataFrame and check for previous charges
-    for i in range(1, len(df)):
-        current_row = df.iloc[i]
-        previous_rows = df.iloc[:i]
-
-        # Check the day before and the same weekday the week before
-        previous_day = current_row['date'] - pd.Timedelta(days=1)
-        previous_weekday = current_row['date'] - pd.Timedelta(weeks=1)
-
-        same_quarter_hour_day = previous_rows[
-            (previous_rows['quarter_hours'] == current_row['quarter_hours']) &
-            (previous_rows['date'] == previous_day)
-            ]
-
-        same_quarter_hour_week = previous_rows[
-            (previous_rows['quarter_hours'] == current_row['quarter_hours']) &
-            (previous_rows['date'] == previous_weekday)
-            ]
-
-        if not same_quarter_hour_day.empty:
-            df.at[i, 'previous_day_charge'] = 1
-        if not same_quarter_hour_week.empty:
-            df.at[i, 'previous_week_charge'] = 1
+        # Berechnung der zyklischen Features
+        df[f'cyclic_{column}_sin'] = np.sin(2 * np.pi * df[column] / max_val)
+        df[f'cyclic_{column}_cos'] = np.cos(2 * np.pi * df[column] / max_val)
 
     return df
+def check_previous_day(row):
+
+    previous_day = row['StartDate'] - pd.Timedelta(days=1)
+    previous_exists = df_subset[(df_subset['StartDate'] == previous_day) & (df_subset['quarter_hours'] == row['quarter_hours'])].shape[0] > 0
+    return 1 if previous_exists else 0
+
+def check_previous_week(row):
+
+    previous_day = row['StartDate'] - pd.Timedelta(days=7)
+    previous_exists = df_subset[(df_subset['StartDate'] == previous_day) & (df_subset['quarter_hours'] == row['quarter_hours'])].shape[0] > 0
+    return 1 if previous_exists else 0
 
 df_subset = read_in()
 df_subset = timestamp_format(dataframe=df_subset)
@@ -526,8 +529,15 @@ unique_value_count(df=df_subset, df_name="UK")
 
 
 df_subset['quarter_hours'] = df_subset['StartTime'].apply(time_to_quarter_hour)
-df_subset = check_previous_charges(df=df_subset)
 
+df_subset = cyclic_feature_encoding(df=df_subset, targets=['Month', 'DayInMonth', 'Day_Of_Week', 'quarter_hours'])
+
+
+
+df_subset['previous_day_result'] = df_subset.apply(check_previous_day, axis=1)
+
+
+df_subset['previous_week_result'] = df_subset.apply(check_previous_week, axis=1)
 
 
 df_subset.to_excel('output1.xlsx', index=False)
