@@ -135,11 +135,11 @@ def process_data(duplicated_df, unique_hours, n_samples=1, SEED=None):
 def create_temporal_features(df):
     gb_holidays = hd.GB(state='ENG', observed=False)
 
-    df['UTCTransactionStop'] = pd.to_datetime(df['UTCTransactionStop'])
-    df['Hour_of_Day'] = df['UTCTransactionStop'].dt.hour
-    df['Day_Of_Week'] = df['UTCTransactionStop'].dt.dayofweek
-    df['Day_Of_year'] = df['UTCTransactionStop'].dt.dayofyear
-    df['Month_Of_Year'] = df['UTCTransactionStop'].dt.month
+    df['UTCTransactionStart'] = pd.to_datetime(df['UTCTransactionStart'])
+    df['Hour_of_Day'] = df['UTCTransactionStart'].dt.hour
+    df['Day_Of_Week'] = df['UTCTransactionStart'].dt.dayofweek
+    df['Day_Of_year'] = df['UTCTransactionStart'].dt.dayofyear
+    df['Month_Of_Year'] = df['UTCTransactionStart'].dt.month
 
     conditions = [
     (df['Hour_of_Day'] >= 0) & (df['Hour_of_Day'] < 4) & (df['Energy'] != 0),
@@ -152,7 +152,10 @@ def create_temporal_features(df):
 
     categories = ['lateNight', 'earlyMorning', 'morning', 'midDay', 'evening', 'night']
 
-    df['sessionOfDay'] = pd.Categorical(np.select(conditions, categories), categories=categories)
+    df['sessionOfDay'] = np.select(conditions, categories, default='unknown')
+
+    # Konvertiere die sessionOfDay-Spalte zu einer kategorialen Variable und dann zu Codes
+    df['sessionOfDay'] = pd.Categorical(df['sessionOfDay'], categories=categories)
     df['sessionOfDay'] = df['sessionOfDay'].cat.codes
 
     df['Time_of_day_0_4'] = ((df['Hour_of_Day'] >= 0) & (df['Hour_of_Day'] < 4) & (df['Energy'] != 0)).astype(int)
@@ -162,14 +165,15 @@ def create_temporal_features(df):
     df['Time_of_day_16_20'] = ((df['Hour_of_Day'] >= 16) & (df['Hour_of_Day'] < 20) & (df['Energy'] != 0)).astype(int)
     df['Time_of_day_20_24'] = ((df['Hour_of_Day'] >= 20) & (df['Hour_of_Day'] < 24) & (df['Energy'] != 0)).astype(int)
 
+    return df
     def categorize_day(timestamp):
         date = timestamp.date()
         if date in gb_holidays:
             return 'Holiday: ' + gb_holidays[date]
         elif timestamp.weekday() == 5:
-            return 'WeekendSaturday'
+            return 'Weekend Saturday'
         elif timestamp.weekday() == 6:
-            return 'WeeekendSunday'
+            return 'Weeekend Sunday'
         else:
             return 'Weekday'
 
@@ -177,8 +181,10 @@ def create_temporal_features(df):
 
     df['Season'] = (df['Month_Of_Year'] % 12 + 3) // 3
 
-    london_tz = pytz.timezone('Europe/London')
-    df['daylightSaving'] = df['UTCTransactionStop'].dt.tz_localize('UTC').dt.tz_convert(london_tz).apply(lambda x: int(x.dst().total_seconds() != 0))
+
+    # do i need this?
+    #london_tz = pytz.timezone('Europe/London')
+    # df['daylightSaving'] = df['UTCTransactionStop'].dt.tz_localize('UTC').dt.tz_convert(london_tz).apply(lambda x: int(x.dst().total_seconds() != 0))
 
     return df
 def day_categories(df, source_column):
@@ -511,6 +517,25 @@ def check_previous_week(row):
     previous_exists = df_subset[(df_subset['StartDate'] == previous_day) & (df_subset['quarter_hours'] == row['quarter_hours'])].shape[0] > 0
     return 1 if previous_exists else 0
 
+
+def drop_and_sort_columns(df_subset, columns_to_drop):
+    columns_to_drop = [col for col in columns_to_drop if col in df_subset.columns]
+
+    # Entferne die Spalten
+    df_subset = df_subset.drop(columns=columns_to_drop)
+
+    columns_to_move = ['UTCTransactionStart', 'UTCTransactionStop']
+    columns_to_move = [col for col in columns_to_move if col in df_subset.columns]
+
+    # Neue Spaltenreihenfolge festlegen
+    remaining_columns = [col for col in df_subset.columns if col not in columns_to_move]
+    new_column_order = columns_to_move + remaining_columns
+
+    # DataFrame mit neuer Spaltenreihenfolge zurückgeben
+    df_subset = df_subset[new_column_order]
+    return df_subset
+
+
 df_subset = read_in()
 df_subset = timestamp_format(dataframe=df_subset)
 df_subset = timezonecorrection(dataframe=df_subset)
@@ -530,6 +555,7 @@ unique_value_count(df=df_subset, df_name="UK")
 
 df_subset['quarter_hours'] = df_subset['StartTime'].apply(time_to_quarter_hour)
 
+# do i actually have to encode this?
 df_subset = cyclic_feature_encoding(df=df_subset, targets=['Month', 'DayInMonth', 'Day_Of_Week', 'quarter_hours'])
 
 
@@ -539,8 +565,16 @@ df_subset['previous_day_result'] = df_subset.apply(check_previous_day, axis=1)
 
 df_subset['previous_week_result'] = df_subset.apply(check_previous_week, axis=1)
 
+df_subset = drop_and_sort_columns(df_subset, columns_to_drop = ['ChargingEvent', 'StartDate', 'StartTime', 'EndDate', 'EndTime'
+                                                                , 'prcp','snow', 'wdir', 'wspd', 'wspd', 'wpgt', 'pres'
+                                                                , 'tsun'])
+
 
 df_subset.to_excel('output1.xlsx', index=False)
+
+print(df_subset.columns)
+
+
 
 
 # cant use it because the dataset has no DoneCharging Timestamp
